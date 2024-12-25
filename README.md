@@ -18,7 +18,7 @@ FRBAC is an access control model for IoT-based systems, especially healthcare sy
   >pip install -r requirements.txt
 
 
-* Run Server:
+* Run Server after editing the .env file variables:
   >cd server
 
   >python -m uvicorn main:app --reload
