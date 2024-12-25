@@ -1,0 +1,10 @@
+pymongo==4.4.1
+fastapi==0.100.1
+uvicorn==0.23.2
+tb-rest-client==3.5
+six==1.16.0
+jwt
+requests
+pytz
+pyDes
+python-dotenv
