@@ -16,15 +16,15 @@ def default():
     return{"Welcome to FRBAC Model"}
 
 #fetchOwnAC
-@routes.get('/fetchOwnData/{UserName}/{role}/{passw}')
-async def fetchOwnPrivileges(UserName,role,passw):
+@routes.post('/fetchOwnData/')
+async def fetchOwnPrivileges(items:fetchData):
     mdb=Mdb()
     FRBAC_db=mdb.get_FRBAC_db()
     output="unexpected Err"
-    user=FRBAC_db.Users.find_one({'user_name':UserName,'role_label':role,'password':passw})
+    user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
 
     if user!=None:
-        user_role=FRBAC_db.Roles.find_one({'id':user["role_id"],'name':role})
+        user_role=FRBAC_db.Roles.find_one({'id':user["role_id"],'name':items.role})
         key = os.getenv("KEY")
         privileges=decrypt_privileges(user_role["privileges"],key)
         output={'data':user["Data"],'role_privileges':privileges}
@@ -34,16 +34,16 @@ async def fetchOwnPrivileges(UserName,role,passw):
     return output 
 
 #fetchRelatedACs
-@routes.get('/users/privileges/{UserName}/{role}/{passw}')
-async def fetch_privileges(UserName,role,passw):
+@routes.post('/users/privileges/')
+async def fetch_privileges(items:fetchData):
     mdb=Mdb()
     FRBAC_db=mdb.get_FRBAC_db()
     output="No User found with this details"
-    user=FRBAC_db.Users.find_one({'user_name':UserName,'role_label':role,'password':passw})
+    user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
 
     if user!=None:
         rels_privileges=[]
-        if role=="self":
+        if items.role=="self":
             relations=FRBAC_db.Relations.find({'user_id':user["user_id"]})
             if relations!=None:
                 rels=serializeListRelation(relations)
@@ -71,22 +71,22 @@ async def fetch_privileges(UserName,role,passw):
     return output
 
 #fetchControlRelACs
-@routes.get('/rel/users/privileges/{UserName}/{role}/{passw}/{relUserName}')
-async def fetch_relPrivileges_control(UserName,role,passw,relUserName):
+@routes.post('/rel/users/privileges/')
+async def fetch_relPrivileges_control(items:fetchRelData):
     mdb=Mdb()
     FRBAC_db=mdb.get_FRBAC_db()
     output="No User found with this details"
-    user=FRBAC_db.Users.find_one({'user_name':UserName,'role_label':role,'password':passw})
+    user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
     if user!=None:
         output="Relation doesn't exist !!!"
-        relation=FRBAC_db.Relations.find_one({'related_user_id':user["user_id"], "user_name":relUserName})
+        relation=FRBAC_db.Relations.find_one({'related_user_id':user["user_id"], "user_name":items.relUserName})
         if relation!=None:
             output="access denied"
             privileges=FRBAC_db.Roles.find_one({'id':relation["relation_role_id"]})["privileges"]
             key = os.getenv("KEY")
             privileges=decrypt_privileges(privileges,key)            
             if privileges["C4R"]!=[]: 
-                relations=FRBAC_db.Relations.find({'user_name':relUserName})
+                relations=FRBAC_db.Relations.find({'user_name':items.relUserName})
                 if relations!=None:
                     rels_privileges=[]       
                     rels=serializeListRelation(relations)
@@ -99,9 +99,9 @@ async def fetch_relPrivileges_control(UserName,role,passw,relUserName):
 
     return output
 
-#ACderive
-@routes.post('/ACderive')
-async def ACderive(items:ACderive_Data):
+#fetchOthersData
+@routes.post('/fetchOthersData/')
+async def fetchOthersData(items:fetchOtherData):
     mdb=Mdb()
     FRBAC_db=mdb.get_FRBAC_db()
     user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
@@ -112,14 +112,88 @@ async def ACderive(items:ACderive_Data):
         hchk(role["ancestors"][0],key)
         role=FRBAC_db.Roles.find_one({"id":user["role_id"]})   
         privileges=decrypt_privileges(role["privileges"],key)
+       
+        #chk access derive for data types                      
+        dataTypeParents=FRBAC_db.DataItems.find_one({"name":items.dataType})["ancestors"]              
+        dataTypeParents.append(items.dataType)
+                
+        output="Access Denied"
+        if chk_requesterPrivilege_2_data_2_read(privileges["dataItems_privileges"],dataTypeParents[1:]):
+            #chk relations among users
+            anyRel2Target=FRBAC_db.Relations.find_one({"user_name":items.targetUserName,"related_user_name":items.UserName})
+            output="No Relations"
+            if anyRel2Target!=None:
+                targetUser=FRBAC_db.Users.find_one({'user_name':items.targetUserName,'role_label':items.targetRole})
+                if targetUser!=None:
+                    output=read_targetRole_specific_dataItem(targetUser["Data"],dataTypeParents[1:])
+                else:
+                    output="No target User found with this details"
+
+    return output
+
+#editOthersData
+@routes.post('/editOthersData/')
+async def editOthersData(items:change_Data):
+    mdb=Mdb()
+    FRBAC_db=mdb.get_FRBAC_db()
+    user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
+    output="No User found with this details"
+    if user!=None:
+        role=FRBAC_db.Roles.find_one({"id":user["role_id"]})   
+        key = os.getenv("KEY")
+        hchk(role["ancestors"][0],key)
+
+        anyRel2Target=FRBAC_db.Relations.find_one({"user_name":items.targetUserName,"related_user_name":items.UserName})
+
+        output="No Relations"
+        if anyRel2Target!=None:
+            role=FRBAC_db.Roles.find_one({"id":anyRel2Target["relation_role_id"]})
+            privileges=decrypt_privileges(role["privileges"],key)
+        
+            #chk access derive for data types                      
+            dataTypeParents=FRBAC_db.DataItems.find_one({"name":items.dataType})["ancestors"]              
+            dataTypeParents.append(items.dataType)
+            output="Access Denied"
+            if chk_requesterPrivilege_2_data_2_write(privileges["dataItems_privileges"],dataTypeParents[1:]):
+                #chk relations among users
+                targetUser=FRBAC_db.Users.find_one({'user_name':items.targetUserName,'role_label':items.targetRole})
+                if targetUser!=None:
+                    output=edit_targetRole_specific_dataItem(targetUser["Data"],dataTypeParents[1:],items.newData)
+                    FRBAC_db.Users.update_one({'user_name':items.targetUserName,'role_label':items.targetRole}, { "$set": {"Data":output}})
+                else:
+                    output="No target User found with this details"
+
+    return output
+
+#ACderive
+@routes.post('/ACderive/')
+async def ACderive(items:ACderive_Data):
+    mdb=Mdb()
+    FRBAC_db=mdb.get_FRBAC_db()
+    user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
+    output="No User found with this details"
+    if user!=None:
+        role=FRBAC_db.Roles.find_one({"id":user["role_id"]})   
+        key = os.getenv("KEY")
+        hchk(role["ancestors"][0],key)
+
+        if items.targetUserName:
+            user_relation=FRBAC_db.Relations.find_one({"user_name":items.targetUserName,"related_user_name":items.UserName})
+        elif items.role=="self":
+            user_relation=FRBAC_db.Relations.find_one({"user_name":items.UserName,"related_user_name":items.UserName})
+        else:
+            user_relation=FRBAC_db.Relations.find_one({"user_name":items.relUserName,"related_user_name":items.UserName})
+
+        role=FRBAC_db.Roles.find_one({"id":user_relation["relation_role_id"]})   
+        privileges=decrypt_privileges(role["privileges"],key)
         output="Privilege Denied"
+
         if privileges["C4R"] != []:
             C4Roles=privileges["C4R"]
             EsclatationRole=FRBAC_db.Roles.find_one({"name":items.relRole})
             relRoleParents=EsclatationRole["ancestors"]
             esclatation_role_privilege=EsclatationRole["privileges"]
             esclatation_role_privilege=decrypt_privileges(esclatation_role_privilege,key)
-
             if items.relRole in C4Roles or any(i in C4Roles for i in relRoleParents): 
                 #chk access derive for special privileges                
                 relRoleParent=FRBAC_db.Roles.find_one({"name":relRoleParents[0]})
@@ -127,7 +201,7 @@ async def ACderive(items:ACderive_Data):
                 relRoleParentName=relRoleParent["name"]
                 relRoleParentCildrenNO=len(relRoleParentCildren)
                 relRoleParentPrivileges=decrypt_privileges(relRoleParent["privileges"],key)
-
+                
                 r4srParents=FRBAC_db.Roles.find({"name":{"$in":items.R4SR}})
                 r4srParents=serializeListRoles(r4srParents)
                 r4swParents=FRBAC_db.Roles.find({"name":{"$in":items.R4SW}})
@@ -146,8 +220,16 @@ async def ACderive(items:ACderive_Data):
                     esclatation_role_privilege["R4SW"]=items.R4SW
                             
                     output="Access Denied"
-                    if chk_requesterPrivilege_2_data(privileges["dataItems_privileges"],dataTypeParents[1:]):
-                        if chk_dataDerivePrivilege_4_role(relRoleParentPrivileges["dataItems_privileges"],dataTypeParents[1:],items.newPrivilege):
+                    if chk_requesterPrivilege_2_data_2_change(privileges["dataItems_privileges"],dataTypeParents[1:]):
+                        #to chk least privilege of related role  
+                        if items.targetUserName:
+                            relation=FRBAC_db.Relations.find_one({"user_name":items.targetUserName,"related_user_name":items.relUserName})
+                        else:
+                            relation=FRBAC_db.Relations.find_one({"user_name":items.UserName,"related_user_name":items.relUserName})
+                        labeledRelRole=FRBAC_db.Roles.find_one({"name":relation["relation_role_label"]})
+                        labeledRelRolePrivileges=decrypt_privileges(labeledRelRole["privileges"],key)
+                        isParent=role["name"] in relRoleParents
+                        if chk_dataDerivePrivilege_4_role(relRoleParentPrivileges["dataItems_privileges"],labeledRelRolePrivileges["dataItems_privileges"],dataTypeParents[1:],items.newPrivilege,isParent):
                             change_dataTypes_privileges(esclatation_role_privilege["dataItems_privileges"],dataTypeParents[1:],items.newPrivilege)
                             esclatation_role_privilege_hashed=encrypt_privileges(esclatation_role_privilege,key)
                             newRoleID=0
@@ -167,8 +249,85 @@ async def ACderive(items:ACderive_Data):
                                     FRBAC_db.Relations.update_one({"user_name":items.targetUserName,"related_user_name":items.relUserName},{ "$set": { "relation_role_id": newRoleID } })
                             else:
                                 FRBAC_db.Relations.update_one({"user_name":items.UserName,"related_user_name":items.relUserName},{ "$set": { "relation_role_id": newRoleID } })
+                           
                             output="done"
                             hchk(relRoleParentName,key)
+
+    return output
+
+#specific ACderive for R*, W*
+@routes.post('/specificACderive/')
+async def specific_ACderive(items:specificACderive_Data):
+    mdb=Mdb()
+    FRBAC_db=mdb.get_FRBAC_db()
+    user=FRBAC_db.Users.find_one({'user_name':items.UserName,'role_label':items.role,'password':items.passw})
+    output="No User found with this details"
+    if user!=None:
+        role=FRBAC_db.Roles.find_one({"id":user["role_id"]})
+        key = os.getenv("KEY")
+        hchk(role["ancestors"][0],key)
+        role=FRBAC_db.Roles.find_one({"id":user["role_id"]})   
+        privileges=decrypt_privileges(role["privileges"],key)
+
+        esclatationRole=FRBAC_db.Roles.find_one({"name":items.esclatationRole})
+        esclatationRoleParents=esclatationRole["ancestors"]
+
+        #chk access derive for special privileges                
+        esclatationRoleParent=FRBAC_db.Roles.find_one({"name":esclatationRoleParents[0]})
+        esclatationRoleParentCildren=esclatationRoleParent["children"]
+        esclatationRoleParentName=esclatationRoleParent["name"]
+        esclatationRoleParentCildrenNO=len(esclatationRoleParentCildren)
+        esclatationRoleParentPrivileges=decrypt_privileges(esclatationRoleParent["privileges"],key)
+
+        #chk access derive for data types                      
+        dataTypeParents=FRBAC_db.DataItems.find_one({"name":items.dataType})["ancestors"]              
+        dataTypeParents.append(items.dataType)
+                
+        output="Access Denied"
+        requester_min_privilege=0
+        newPrivilege=0
+        if items.newPrivilege=="R":
+            requester_min_privilege=10011#R*
+            newPrivilege=10001
+        else:
+            requester_min_privilege=11100#W*
+            newPrivilege=10100
+
+        if chk_requesterPrivilege_2_data_2_change(privileges["dataItems_privileges"],dataTypeParents[1:],requester_min_privilege):
+            if chk_specificDataDerivePrivilege_4_role(esclatationRoleParentPrivileges["dataItems_privileges"],dataTypeParents[1:],newPrivilege):
+                newPermissions=dataTypes_privileges.template
+                rebuild_dataTypes_privileges(dataTypeParents[1:],newPermissions,newPrivilege)
+                #set all to null
+                esclatation_role_privilege={"dataItems_privileges":newPermissions}
+                esclatation_role_privilege["C4R"]=[]
+                esclatation_role_privilege["R4SR"]=[]
+                esclatation_role_privilege["R4SW"]=[]
+
+                esclatation_role_privilege_hashed=encrypt_privileges(esclatation_role_privilege,key)
+                newRoleID=0
+                for child,childHash in esclatationRoleParentCildren.items():
+                    if esclatation_role_privilege_hashed==childHash:
+                        newRoleID=int(child)
+                        break
+
+                esclatationUser=FRBAC_db.Users.find_one({'user_name':items.esclatationUserName})
+                targetUser=FRBAC_db.Users.find_one({'user_name':items.targetUserName})
+
+                if not(newRoleID):
+                    name=esclatationRoleParentName+"child"+str(esclatationRoleParentCildrenNO)
+                    newRoleID=FRBAC_db.Roles.count_documents({})
+                    FRBAC_db.Roles.insert_one({"name": name,"id": newRoleID,"privileges": esclatation_role_privilege_hashed,"children": {},"ancestors": esclatationRoleParents})
+                    updateAncestorsChildren(esclatationRoleParents,esclatation_role_privilege_hashed,newRoleID)
+
+                    #add rel among target and esclation role
+                    FRBAC_db.Relations.insert_one({"related_user_name": items.esclatationUserName, "related_user_id":esclatationUser["user_id"], "relation_role_id": newRoleID, "relation_role_label":name, "user_name": items.targetUserName, "user_id":targetUser["user_id"] })
+                else:
+                    labeledRole=FRBAC_db.Roles.find_one({"id":newRoleID})
+                    name=labeledRole["name"]
+                    FRBAC_db.Relations.insert_one({"related_user_name": items.esclatationUserName, "related_user_id":esclatationUser["user_id"], "relation_role_id":newRoleID , "relation_role_label":name, "user_name": items.targetUserName, "user_id":targetUser["user_id"] })
+                print("Gand:\n",esclatation_role_privilege)
+                output="done"
+                hchk(esclatationRoleParentName,key)
 
     return output
 

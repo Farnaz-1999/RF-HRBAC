@@ -40,7 +40,7 @@ def chk_parentPrivilege(childDT_privileges,parentDT_privileges):
                     return False
     return True
 
-def chkParentalSpecialPermmision(parent_privilege,child_privilege):
+def chkParentalSpecialPrivileges(parent_privilege,child_privilege):
     mdb=Mdb()
     FRBAC_db=mdb.get_FRBAC_db()
     r4srParents=FRBAC_db.Roles.find({"name":{"$in":child_privilege["R4SR"]}})
@@ -91,26 +91,34 @@ def repairFromParent(roleName,ancestors):
             role_privilege=encrypt_privileges(role_privilege,newKey)
             FRBAC_db.Roles.update_one({"name":roleName},{"$set":{"privileges":role_privilege}})
 
-def hchk(roleName,key):
-    mdb=Mdb()
-    FRBAC_db=mdb.get_FRBAC_db()
-    children_privilege={}
+def sub_hchk(role,children_privilege,privileges,FRBAC_db,key):
     sw=0
-    role=FRBAC_db.Roles.find_one({"name":roleName})
-    try:
-        privileges=decrypt_privileges(role["privileges"],key)
-    except:        
-        repairFromParent(role["name"],role["ancestors"])
-        role=FRBAC_db.Roles.find_one({"name":roleName})
-        privileges=decrypt_privileges(role["privileges"],key)
-
-    for childID,child_privilege in role["children"].items():        
-        if not(child_privilege in children_privilege.values()) and chkParentalSpecialPermmision(privileges,decrypt_privileges(child_privilege,key)) and chk_parentPrivilege(decrypt_privileges(child_privilege,key)["dataItems_privileges"],privileges["dataItems_privileges"]):      
+    for childID,child_privilege in role["children"].items():   
+        if(type(child_privilege)==dict):
+            role=FRBAC_db.Roles.find_one({"id":int(childID)})
+            privileges=decrypt_privileges(role["privileges"],key)
+            sub_hchk(role,children_privilege,privileges,FRBAC_db,key)
+        elif not(child_privilege in children_privilege.values()) and chkParentalSpecialPrivileges(privileges,decrypt_privileges(child_privilege,key)) and chk_parentPrivilege(decrypt_privileges(child_privilege,key)["dataItems_privileges"],privileges["dataItems_privileges"]):      
             childRole=FRBAC_db.Roles.find_one({"id":int(childID)})            
             children_privilege.update({childID:hchk(childRole["name"],key)})
         else:
             sw=1
             FRBAC_db.Roles.delete_one({"id":int(childID)})
+    return sw
+
+def hchk(roleName,key):
+    mdb=Mdb()
+    FRBAC_db=mdb.get_FRBAC_db()
+    children_privilege={}
+    role=FRBAC_db.Roles.find_one({"name":roleName})
+    try:
+        privileges=decrypt_privileges(role["privileges"],key)
+    except:    
+        repairFromParent(role["name"],role["ancestors"])
+        role=FRBAC_db.Roles.find_one({"name":roleName})
+        privileges=decrypt_privileges(role["privileges"],key)
+
+    sw=sub_hchk(role,children_privilege,privileges,FRBAC_db,key)
 
     if sw:
         newKey=keyGenerator()
