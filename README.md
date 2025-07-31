@@ -1,17 +1,17 @@
-# FRBAC
-FRBAC is an access control model for IoT-based systems, especially healthcare systems.
+# RF_HRBAC
+RF_HRBAC is an access control model for IoT-based systems, especially healthcare systems.
 
 * Create Envirenment:
-  >python3 -m venv FRBAC
+  >python3 -m venv RF_HRBAC
 
 
 * Activate Enviernment:
 
   (in MacOS):  
-    >source FRBAC/bin/activate
+    >source RF_HRBAC/bin/activate
   
   (in Windows):
-    >.\FRBAC\Scripts\bin\activate
+    >.\RF_HRBAC\Scripts\bin\activate
 
 
 * Install Requierments:
