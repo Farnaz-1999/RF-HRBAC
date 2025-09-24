@@ -10,9 +10,9 @@ class Mdb:
         load_dotenv()
         self.__mongodb_connection= MongoClient(os.getenv("MONGO_URL"))
 
-    def get_FRBAC_db(self):
-        FRBAC_Mdb=self.__mongodb_connection.FRBAC_db
-        return FRBAC_Mdb
+    def get_FRHRBAC_db(self):
+        FRHRBAC_Mdb=self.__mongodb_connection.FRHRBAC_db
+        return FRHRBAC_Mdb
 
     def __disconnect(self):
         self.__mongodb_connection.close()
